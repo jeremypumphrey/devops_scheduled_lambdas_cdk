@@ -13,7 +13,7 @@ from constructs import Construct
 import os
 
 
-class ScheduledLambdasStack(Stack):
+class DevopsScheduledLambdasStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
@@ -25,7 +25,7 @@ class ScheduledLambdasStack(Stack):
 
         # (Optional) Add email subscription
         alert_topic.add_subscription(
-            subs.EmailSubscription("your.email@example.com")
+            subs.EmailSubscription("jeremy.pumphrey@nih.gov")
         )
 
         # 🧱 Helper function to create Lambdas
@@ -101,10 +101,10 @@ class ScheduledLambdasStack(Stack):
             .next(step2)
             .next(step3)
             .next(success_notify)
-        ).add_catch(
-            failure_notify,
-            errors=["States.ALL"],
-            result_path="$.error"
+        # ).add_catch(
+        #     failure_notify,
+        #     errors=["States.ALL"],
+        #     result_path="$.error"
         )
 
         # ⚙️ State Machine (modern CDK style)

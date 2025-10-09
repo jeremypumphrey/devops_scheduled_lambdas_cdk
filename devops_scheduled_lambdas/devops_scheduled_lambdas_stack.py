@@ -8,10 +8,11 @@ from aws_cdk import (
     aws_stepfunctions_tasks as tasks,
     aws_sns as sns,
     aws_sns_subscriptions as subs,
+    aws_logs as logs,
+    aws_iam as iam
 )
 from constructs import Construct
 import os
-
 
 class DevopsScheduledLambdasStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
@@ -111,13 +112,27 @@ class DevopsScheduledLambdasStack(Stack):
         state_machine = sfn.StateMachine(
             self, "DevopsScheduledWorkflow",
             definition_body=sfn.DefinitionBody.from_chainable(definition_chain),
-            timeout=Duration.minutes(5)
+            # errors=["States.ALL"], # Catch all errors
+            timeout=Duration.minutes(5),
+            # logs=sfn.LogOptions(
+            #     destination=logs.LogGroup(self, "DevopsScheduledWorkflowLogs"),
+            #     level=sfn.LogLevel.ALL
+            # ),
+            # tracing_enabled=True
         )
+        # state_machine.role.add_to_policy(iam.PolicyStatement(
+        #     actions=[
+        #         "logs:CreateLogStream",
+        #         "logs:PutLogEvents"
+        #     ],
+            # resources=[log_group.log_group_arn]
+        #     resources=[state_machine.log_group.log_group_arn]
+        # ))
 
         # 🕒 EventBridge rule (runs hourly)
         events.Rule(
             self, "DevopsRunScheduleRule",
             # schedule=events.Schedule.rate(Duration.hours(1)),
-            schedule=events.Schedule.cron(minute="0", hour="12"),
+            schedule=events.Schedule.cron(minute="0", hour="17"),  # Daily at 5 PM UTC
             targets=[targets.SfnStateMachine(state_machine)]
         )

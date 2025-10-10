@@ -50,12 +50,14 @@ class DevopsScheduledLambdasStack(Stack):
         lambda2 = create_lambda("lambda2")
         lambda3 = create_lambda("lambda3")
 
+
         # 🪄 Step Function tasks (each with retries)
         step1 = tasks.LambdaInvoke(
             self,
             "Run Lambda 1",
             lambda_function=lambda1,
-            output_path="$.Payload",
+            # output_path="$.Payload",
+            result_path="$.message"
         ).add_retry(
             max_attempts=2,
             interval=Duration.seconds(10),
@@ -71,6 +73,15 @@ class DevopsScheduledLambdasStack(Stack):
             self, "Run Lambda 3", lambda_function=lambda3, output_path="$.Payload"
         ).add_retry(max_attempts=2, interval=Duration.seconds(10), backoff_rate=2.0)
 
+        # ✅ Step Status notification
+        step_notify = tasks.SnsPublish(
+            self,
+            "Post Step Notification",
+            topic=alert_topic,
+            message=sfn.TaskInput.from_json_path_at("$.message"),
+            subject="Lambda Workflow Step Complete",
+        )
+        
         # ✅ Success notification
         success_notify = tasks.SnsPublish(
             self,
@@ -78,9 +89,8 @@ class DevopsScheduledLambdasStack(Stack):
             topic=alert_topic,
             message=sfn.TaskInput.from_text(
                 "✅ Step Function workflow completed successfully."
-                # message=sfn.TaskInput.from_object
             ),
-            subject="Lambda Workflow Success",
+            subject="Scheduled Lambda Workflow Success",
         )
 
         # 🧨 Failure notification
@@ -91,18 +101,18 @@ class DevopsScheduledLambdasStack(Stack):
             message=sfn.TaskInput.from_text(
                 "⚠️ Step Function workflow failed. Check CloudWatch logs for details."
             ),
-            subject="Lambda Workflow Failure",
+            subject="Scheduled Lambda Workflow Failure",
         )
 
         # 🧭 Define workflow sequence
         definition_chain = (
-            step1.next(step2)
+            step1
+            .next(step_notify)
+            .next(step2)
+            # .next(step_notify)
             .next(step3)
+            # .next(step_notify)
             .next(success_notify)
-            # ).add_catch(
-            #     failure_notify,
-            #     errors=["States.ALL"],
-            #     result_path="$.error"
         )
 
         # ⚙️ State Machine (modern CDK style)
@@ -110,22 +120,8 @@ class DevopsScheduledLambdasStack(Stack):
             self,
             "DevopsScheduledWorkflow",
             definition_body=sfn.DefinitionBody.from_chainable(definition_chain),
-            # errors=["States.ALL"], # Catch all errors
-            timeout=Duration.minutes(5),
-            # logs=sfn.LogOptions(
-            #     destination=logs.LogGroup(self, "DevopsScheduledWorkflowLogs"),
-            #     level=sfn.LogLevel.ALL
-            # ),
-            # tracing_enabled=True
+            timeout=Duration.minutes(15),
         )
-        # state_machine.role.add_to_policy(iam.PolicyStatement(
-        #     actions=[
-        #         "logs:CreateLogStream",
-        #         "logs:PutLogEvents"
-        #     ],
-        # resources=[log_group.log_group_arn]
-        #     resources=[state_machine.log_group.log_group_arn]
-        # ))
 
         # 🕒 EventBridge rule (runs hourly)
         events.Rule(

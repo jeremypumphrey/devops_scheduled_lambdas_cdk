@@ -46,10 +46,8 @@ class DevopsScheduledLambdasStack(Stack):
             iam.ManagedPolicy.from_aws_managed_policy_name("AWSLambda_ReadOnlyAccess")
         )
 
-        # lambda1 = create_lambda("lambda1")
         lambda2 = create_lambda("lambda2")
         lambda3 = create_lambda("lambda3")
-
 
         # 🪄 Step Function tasks (each with retries)
         step1 = tasks.LambdaInvoke(
@@ -57,7 +55,7 @@ class DevopsScheduledLambdasStack(Stack):
             "Run Lambda 1",
             lambda_function=lambda1,
             # output_path="$.Payload",
-            result_path="$.message"
+            result_path="$.output",
         ).add_retry(
             max_attempts=2,
             interval=Duration.seconds(10),
@@ -66,22 +64,37 @@ class DevopsScheduledLambdasStack(Stack):
         )
 
         step2 = tasks.LambdaInvoke(
-            self, "Run Lambda 2", lambda_function=lambda2, output_path="$.Payload"
+            self, "Run Lambda 2", lambda_function=lambda2, result_path="$.output"
         ).add_retry(max_attempts=2, interval=Duration.seconds(10), backoff_rate=2.0)
 
         step3 = tasks.LambdaInvoke(
-            self, "Run Lambda 3", lambda_function=lambda3, output_path="$.Payload"
+            self, "Run Lambda 3", lambda_function=lambda3, result_path="$.output"
         ).add_retry(max_attempts=2, interval=Duration.seconds(10), backoff_rate=2.0)
 
         # ✅ Step Status notification
-        step_notify = tasks.SnsPublish(
+        step1_notify = tasks.SnsPublish(
             self,
-            "Post Step Notification",
+            "Post Step 1 Notification",
             topic=alert_topic,
-            message=sfn.TaskInput.from_json_path_at("$.message"),
-            subject="Lambda Workflow Step Complete",
+            message=sfn.TaskInput.from_json_path_at("$.output.Payload"),
+            subject="find_expensive_lambdas Step Complete",
         )
-        
+        step2_notify = tasks.SnsPublish(
+            self,
+            "Post Step 2 Notification",
+            topic=alert_topic,
+            message=sfn.TaskInput.from_json_path_at("$.output.Payload"),
+            subject="Lambda Workflow Step 2 Complete",
+        )
+        step3_notify = tasks.SnsPublish(
+            self,
+            "Post Step 3 Notification",
+            topic=alert_topic,
+            # message=sfn.TaskInput.from_json_path_at("$."),
+            message=sfn.TaskInput.from_json_path_at("$.output.Payload"),
+            subject="Lambda Workflow Step 3 Complete",
+        )
+
         # ✅ Success notification
         success_notify = tasks.SnsPublish(
             self,
@@ -104,24 +117,53 @@ class DevopsScheduledLambdasStack(Stack):
             subject="Scheduled Lambda Workflow Failure",
         )
 
-        # 🧭 Define workflow sequence
-        definition_chain = (
-            step1
-            .next(step_notify)
-            .next(step2)
-            # .next(step_notify)
-            .next(step3)
-            # .next(step_notify)
-            .next(success_notify)
-        )
+        # Create the sequential chain for each Branch of the Parallel state
+        branch_1_chain = sfn.Chain.start(step1).next(step1_notify)
+        branch_2_chain = sfn.Chain.start(step2).next(step2_notify)
+        branch_3_chain = sfn.Chain.start(step3).next(step3_notify)
 
-        # ⚙️ State Machine (modern CDK style)
+        # Create a Parallel state and add the branches
+        parallel_state = sfn.Parallel(
+            self, "DevopsScheduledWorkflowParallel", comment="Runs tasks in parallel"
+        )
+        parallel_state.branch(branch_1_chain)
+        parallel_state.branch(branch_2_chain)
+        parallel_state.branch(branch_3_chain)
+
+        # Define a subsequent state after the parallel execution
+        # success_state = sfn.Succeed(self, "Success")
+
+        # Chain the states to form the state machine definition
+        # definition = parallel_state.next(success_state)
+        definition = parallel_state.next(success_notify)
+
+        # Create the State Machine
         state_machine = sfn.StateMachine(
             self,
             "DevopsScheduledWorkflow",
-            definition_body=sfn.DefinitionBody.from_chainable(definition_chain),
-            timeout=Duration.minutes(15),
+            definition_body=sfn.DefinitionBody.from_chainable(definition),
+            # state_machine_name="MyParallelWorkflow"
         )
+
+        # Sequential workflow
+        # # 🧭 Define workflow sequence
+        # definition_chain = (
+        #     step1
+        #     .next(step_notify)
+        #     .next(step2)
+        #     # .next(step_notify)
+        #     .next(step3)
+        #     # .next(step_notify)
+        #     .next(success_notify)
+        # )
+
+        # # ⚙️ State Machine (modern CDK style)
+        # state_machine = sfn.StateMachine(
+        #     self,
+        #     "DevopsScheduledWorkflow",
+        #     definition_body=sfn.DefinitionBody.from_chainable(definition_chain),
+        #     timeout=Duration.minutes(15),
+        # )
 
         # 🕒 EventBridge rule (runs hourly)
         events.Rule(

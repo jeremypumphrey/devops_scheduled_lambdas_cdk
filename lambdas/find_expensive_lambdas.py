@@ -55,32 +55,7 @@ def lambda_handler(event, context):
             except Exception as e:
                 print(f"⚠️ Error checking Provisioned Concurrency for {fn_name}: {e}")
 
-            # try:
-            #     aliases = lambda_client.list_aliases(FunctionName=fn_name).get("Aliases", [])
-            #     for alias in aliases:
-            #         alias_name = alias["Name"]
-            #         try:
-            #             pc_cfg = lambda_client.get_provisioned_concurrency_config(
-            #                 FunctionName=fn_name, Qualifier=alias_name
-            #             )
-            #             if pc_cfg.get("RequestedProvisionedConcurrentExecutions", 0) > 0:
-            #                 provisioned_enabled = True
-            #                 break
-            #         except lambda_client.exceptions.ProvisionedConcurrencyConfigNotFoundException:
-            #             pass
-
-            #     # Also check $LATEST
-            #     try:
-            #         pc_cfg = lambda_client.get_provisioned_concurrency_config(
-            #             FunctionName=fn_name, Qualifier="$LATEST"
-            #         )
-            #         if pc_cfg.get("RequestedProvisionedConcurrentExecutions", 0) > 0:
-            #             provisioned_enabled = True
-            #     except lambda_client.exceptions.ProvisionedConcurrencyConfigNotFoundException:
-            #         pass
-            # except Exception as e:
-            #     print(f"⚠️ Error checking Provisioned Concurrency for {fn_name}: {e}")
-
+            # If either SnapStart or Provisioned Concurrency is enabled, add to report
             if snapstart_enabled or provisioned_enabled:
                 report.append(
                     {
@@ -93,9 +68,6 @@ def lambda_handler(event, context):
                 )
 
     return {
-        "statusCode": 200,
-        "body": {
-            "Summary": f"Found {len(report)} function(s) with SnapStart or Provisioned Concurrency enabled.",
-            "Functions": report,
-        },
+        "Summary": f"Found {len(report)} function(s) with SnapStart or Provisioned Concurrency enabled.",
+        "Functions": report,
     }

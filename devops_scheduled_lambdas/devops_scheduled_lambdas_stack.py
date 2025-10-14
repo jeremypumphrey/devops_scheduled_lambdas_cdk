@@ -8,9 +8,8 @@ from aws_cdk import (
     aws_stepfunctions_tasks as tasks,
     aws_sns as sns,
     aws_sns_subscriptions as subs,
-    # aws_logs as logs,
+    aws_logs as logs,
     aws_iam as iam,
-    TimeZone # Added for cron with timezone support
 )
 from constructs import Construct
 import os
@@ -19,6 +18,12 @@ import os
 class DevopsScheduledLambdasStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
+        # sfn_role = iam.Role(
+        #     self, "StepFunctionExecutionRole",
+        #     assumed_by=iam.ServicePrincipal("states.amazonaws.com"),
+        #     description="Execution role for DevopsScheduledLambdasStack Step Function",
+        # )
 
         # 🔔 SNS Topic for workflow alerts
         alert_topic = sns.Topic(
@@ -46,9 +51,13 @@ class DevopsScheduledLambdasStack(Stack):
         lambda1.role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name("AWSLambda_ReadOnlyAccess")
         )
+        # lambda1.grant_invoke(sfn_role)
 
         lambda2 = create_lambda("lambda2")
+        # lambda2.grant_invoke(sfn_role)
+        
         lambda3 = create_lambda("lambda3")
+        # lambda2.grant_invoke(sfn_role)
 
         # 🪄 Step Function tasks (each with retries)
         step1 = tasks.LambdaInvoke(
@@ -78,7 +87,7 @@ class DevopsScheduledLambdasStack(Stack):
             "Post Step 1 Notification",
             topic=alert_topic,
             message=sfn.TaskInput.from_json_path_at("$.output.Payload"),
-            subject="find_expensive_lambdas Step Complete",
+            subject="find_expensive_lambdas Results",
         )
         step2_notify = tasks.SnsPublish(
             self,
@@ -134,39 +143,64 @@ class DevopsScheduledLambdasStack(Stack):
         # Chain the states to form the state machine definition
         definition = parallel_state.next(success_notify)
 
+        # set logging for the state machine
+        # log_group = logs.LogGroup(
+        #     self,
+        #     "DevopsScheduledWorkflowLogGroup",
+        #     # log_group_name="/aws/vendedlogs/states/DevopsScheduledWorkflowLogGroup", # Recommended prefix for Step Functions logs
+        #     retention=logs.RetentionDays.ONE_MONTH,
+        # )
+        # log_group.grant_write(sfn_role)
+        # # sfn_role.add_managed_policy(
+        # #     iam.ManagedPolicy.from_aws_managed_policy_name("CloudWatchLogsFullAccess")
+        # # )
+        # sfn_role.add_to_policy(
+        #     iam.PolicyStatement(
+        #         actions=[
+        #             "logs:CreateLogStream",
+        #             "logs:PutLogEvents",
+        #             "logs:CreateLogDelivery",
+        #             "logs:GetLogDelivery",
+        #             "logs:UpdateLogDelivery",
+        #             "logs:DeleteLogDelivery",
+        #             "logs:ListLogDeliveries",
+        #             "logs:PutResourcePolicy",
+        #             "logs:DescribeResourcePolicies",
+        #             "logs:DescribeLogGroups",
+        #             "logs:CreateLogGroup",
+        #             "logs:CreateLogStream",
+        #             "logs:PutLogEvents",
+        #             "logs:DescribeLogStreams",
+        #         ],
+        #         resources=[log_group.log_group_arn],
+        #     )
+        # )
+
         # Create the State Machine
         state_machine = sfn.StateMachine(
             self,
             "DevopsScheduledWorkflow",
             definition_body=sfn.DefinitionBody.from_chainable(definition),
-            # state_machine_name="MyParallelWorkflow"
+            # state_machine_name="MyParallelWorkflow",
+            # role=sfn_role,
+            # logs=sfn.LogOptions(
+            #     destination=log_group,
+            #     level=sfn.LogLevel.ALL,
+            #     include_execution_data=True,
+            # ),
         )
-
-        # Sequential workflow
-        # # 🧭 Define workflow sequence
-        # definition_chain = (
-        #     step1
-        #     .next(step_notify)
-        #     .next(step2)
-        #     # .next(step_notify)
-        #     .next(step3)
-        #     # .next(step_notify)
-        #     .next(success_notify)
-        # )
-
-        # # ⚙️ State Machine (modern CDK style)
-        # state_machine = sfn.StateMachine(
-        #     self,
-        #     "DevopsScheduledWorkflow",
-        #     definition_body=sfn.DefinitionBody.from_chainable(definition_chain),
-        #     timeout=Duration.minutes(15),
-        # )
 
         # 🕒 EventBridge rule (runs hourly)
         events.Rule(
             self,
             "DevopsRunScheduleRule",
             # schedule=events.Schedule.rate(Duration.hours(1)), #run hourly
-            schedule=events.Schedule.cron(time_zone=TimeZone.AMERICA_NEW_YORK, minute="0", hour="09", month="*", week_day="MON", year="*"),  # Every Monday at 9am Eastern
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="14",  # 2pm UTC = 9am Eastern
+                month="*",
+                week_day="MON",
+                year="*",
+            ),  # Every Monday at 9am Eastern
             targets=[targets.SfnStateMachine(state_machine)],
         )

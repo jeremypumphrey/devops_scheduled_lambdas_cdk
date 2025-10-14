@@ -8,8 +8,9 @@ from aws_cdk import (
     aws_stepfunctions_tasks as tasks,
     aws_sns as sns,
     aws_sns_subscriptions as subs,
-    aws_logs as logs,
+    # aws_logs as logs,
     aws_iam as iam,
+    TimeZone # Added for cron with timezone support
 )
 from constructs import Construct
 import os
@@ -127,14 +128,10 @@ class DevopsScheduledLambdasStack(Stack):
             self, "DevopsScheduledWorkflowParallel", comment="Runs tasks in parallel"
         )
         parallel_state.branch(branch_1_chain)
-        parallel_state.branch(branch_2_chain)
-        parallel_state.branch(branch_3_chain)
-
-        # Define a subsequent state after the parallel execution
-        # success_state = sfn.Succeed(self, "Success")
+        # parallel_state.branch(branch_2_chain) # Uncomment to run in parallel
+        # parallel_state.branch(branch_3_chain) # Uncomment to run in parallel
 
         # Chain the states to form the state machine definition
-        # definition = parallel_state.next(success_state)
         definition = parallel_state.next(success_notify)
 
         # Create the State Machine
@@ -169,7 +166,7 @@ class DevopsScheduledLambdasStack(Stack):
         events.Rule(
             self,
             "DevopsRunScheduleRule",
-            # schedule=events.Schedule.rate(Duration.hours(1)),
-            schedule=events.Schedule.cron(minute="0", hour="17"),  # Daily at 5 PM UTC
+            # schedule=events.Schedule.rate(Duration.hours(1)), #run hourly
+            schedule=events.Schedule.cron(time_zone=TimeZone.AMERICA_NEW_YORK, minute="0", hour="09", month="*", week_day="MON", year="*"),  # Every Monday at 9am Eastern
             targets=[targets.SfnStateMachine(state_machine)],
         )
